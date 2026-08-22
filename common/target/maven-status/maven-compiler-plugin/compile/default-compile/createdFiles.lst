@@ -1,0 +1,4 @@
+com/weathermonitoring/common/util/JsonUtil.class
+com/weathermonitoring/common/model/Weather.class
+com/weathermonitoring/common/util/Topics.class
+com/weathermonitoring/common/model/WeatherStatusMessage.class

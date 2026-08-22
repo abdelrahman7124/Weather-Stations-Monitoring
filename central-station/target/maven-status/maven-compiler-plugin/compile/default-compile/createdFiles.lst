@@ -1,0 +1,4 @@
+com/weathermonitoring/central/CentralStationApp.class
+com/weathermonitoring/central/RainDetectorApp.class
+com/weathermonitoring/central/DbConfig.class
+com/weathermonitoring/central/WeatherReadingRepository.class
