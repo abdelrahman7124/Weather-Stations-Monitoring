@@ -45,6 +45,11 @@ weather-monitoring/
 │   ├── central-station.yaml
 │   ├── rain-detector.yaml
 │   └── README.md
+├── cloud/                        # AWS two-VM bonus deployment
+│   ├── docker-compose.central.yml
+│   ├── docker-compose.stations.yml
+│   ├── .env.example
+│   └── README.md
 └── Lab4-NetCentric.pdf
 ```
 
@@ -90,6 +95,13 @@ The StatefulSet is used because each station needs a unique ID. Pods `weather-st
 
 See [`k8s/README.md`](k8s/README.md) for the exact Minikube build, deployment, and validation commands.
 
+## Cloud deployment — bonus
+
+[`cloud/README.md`](cloud/README.md) deploys the same system across two AWS
+EC2 instances without Kubernetes, writing to a managed Aiven PostgreSQL
+database. Stations run on one VM, Kafka and the central station on the
+other, and all configuration comes from a gitignored `cloud/.env`.
+
 ## SQL analysis
 
 `db/analysis_queries.sql` contains the required historical checks:
@@ -132,6 +144,8 @@ docker build -f central-station/Dockerfile -t central-station:latest .
 
 ## Submission checklist
 
+Mandatory:
+
 - [x] Weather station mock
 - [x] 30/40/30 battery distribution
 - [x] 10% message drop simulation
@@ -149,4 +163,11 @@ docker build -f central-station/Dockerfile -t central-station:latest .
 - [x] Kubernetes Rain Detector
 - [ ] Run the full cluster and capture screenshots/logs for the final report
 - [ ] Export the final technical report as PDF with actual deployment evidence
-- [ ] Optional cloud bonus
+
+Bonus:
+
+- [x] Two-VM deployment assets (AWS, no Kubernetes) — `cloud/`
+- [x] Managed-database configuration with no secrets in source
+- [ ] Provision the two EC2 instances and the Aiven service
+- [ ] Capture the cloud evidence listed in [`cloud/README.md`](cloud/README.md)
+- [ ] Write the Cloud Deployment section of the report
