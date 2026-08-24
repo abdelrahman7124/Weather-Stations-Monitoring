@@ -13,19 +13,18 @@ import org.slf4j.LoggerFactory;
 
 import java.util.Properties;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
- * Mocks a single weather station.
- * Emits one status message per second to the WEATHER_READINGS Kafka topic.
- *
- * Configuration:
- *   STATION_ID               - long, required (falls back to program arg[0])
- *   KAFKA_BOOTSTRAP_SERVERS  - default 127.0.0.1:9092
+ * Mocks a single weather station. Emits one status message per second.
+ * STATION_ID can be supplied explicitly or derived from a Kubernetes
+ * StatefulSet pod hostname such as weather-station-0.
  */
 public class WeatherStationApp {
 
     private static final Logger log = LoggerFactory.getLogger(WeatherStationApp.class);
-
+    private static final Pattern ORDINAL_HOSTNAME = Pattern.compile(".*-(\\d+)$");
     private static final int LOW_THRESHOLD = 30;
     private static final int MEDIUM_THRESHOLD = 70;
     private static final int DROP_RATE_PERCENT = 10;
@@ -72,29 +71,28 @@ public class WeatherStationApp {
                 log.info("Station {} sent s_no={} battery={} humidity={}",
                         stationId, sNo, message.getBatteryStatus(), message.getWeather().getHumidity());
             }
-
             Thread.sleep(1000);
         }
     }
 
     private static WeatherStatusMessage buildMessage(long stationId, long sNo) {
         ThreadLocalRandom random = ThreadLocalRandom.current();
-        int humidity = random.nextInt(0, 101);
-        int temperature = random.nextInt(20, 111);
-        int windSpeed = random.nextInt(0, 41);
-        Weather weather = new Weather(humidity, temperature, windSpeed);
-        String batteryStatus = randomBatteryStatus(random);
-        long timestamp = System.currentTimeMillis() / 1000;
-        return new WeatherStatusMessage(stationId, sNo, batteryStatus, timestamp, weather);
+        Weather weather = new Weather(
+                random.nextInt(0, 101),
+                random.nextInt(20, 111),
+                random.nextInt(0, 41));
+        return new WeatherStatusMessage(
+                stationId,
+                sNo,
+                randomBatteryStatus(random),
+                System.currentTimeMillis() / 1000,
+                weather);
     }
 
     private static String randomBatteryStatus(ThreadLocalRandom random) {
         int roll = random.nextInt(0, 100);
-        if (roll < LOW_THRESHOLD) {
-            return "low";
-        } else if (roll < MEDIUM_THRESHOLD) {
-            return "medium";
-        }
+        if (roll < LOW_THRESHOLD) return "low";
+        if (roll < MEDIUM_THRESHOLD) return "medium";
         return "high";
     }
 
@@ -110,7 +108,16 @@ public class WeatherStationApp {
         if (args.length > 0) {
             return Long.parseLong(args[0]);
         }
+
+        String hostname = System.getenv("HOSTNAME");
+        if (hostname != null) {
+            Matcher matcher = ORDINAL_HOSTNAME.matcher(hostname);
+            if (matcher.matches()) {
+                return Long.parseLong(matcher.group(1)) + 1;
+            }
+        }
+
         throw new IllegalArgumentException(
-                "STATION_ID must be provided either as env var STATION_ID or as the first program argument");
+                "STATION_ID must be provided, or HOSTNAME must end in a numeric StatefulSet ordinal");
     }
 }
