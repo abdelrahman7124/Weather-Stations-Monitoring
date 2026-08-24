@@ -18,28 +18,17 @@ import java.util.List;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/**
- * Central Base Station.
- * Consumes weather readings from Kafka and persists them into MySQL using
- * batched inserts (flushes when the batch reaches BATCH_SIZE, or every
- * FLUSH_INTERVAL_MS if fewer messages are arriving, so data isn't stuck
- * in memory during quiet periods).
- *
- * Configuration (env vars, all optional):
- *   KAFKA_BOOTSTRAP_SERVERS  - default 127.0.0.1:9092
- *   DB_URL / DB_USER / DB_PASSWORD - see DbConfig
- */
+/** Central Base Station: consumes readings and persists them in batches. */
 public class CentralStationApp {
 
     private static final Logger log = LoggerFactory.getLogger(CentralStationApp.class);
-
     private static final int BATCH_SIZE = 5000;
     private static final long FLUSH_INTERVAL_MS = 5000;
-
     private static final AtomicBoolean running = new AtomicBoolean(true);
 
     public static void main(String[] args) throws SQLException {
-        String bootstrapServers = System.getenv().getOrDefault("KAFKA_BOOTSTRAP_SERVERS", "127.0.0.1:9092");
+        String bootstrapServers = System.getenv().getOrDefault(
+                "KAFKA_BOOTSTRAP_SERVERS", "127.0.0.1:9092");
 
         Properties properties = new Properties();
         properties.setProperty(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
@@ -51,7 +40,6 @@ public class CentralStationApp {
 
         KafkaConsumer<String, String> consumer = new KafkaConsumer<>(properties);
         consumer.subscribe(List.of(Topics.WEATHER_READINGS));
-
         WeatherReadingRepository repository = new WeatherReadingRepository();
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -61,20 +49,23 @@ public class CentralStationApp {
 
         List<WeatherStatusMessage> buffer = new ArrayList<>(BATCH_SIZE);
         long lastFlush = System.currentTimeMillis();
-
-        log.info("Central Station started. Consuming topic '{}' from {}", Topics.WEATHER_READINGS, bootstrapServers);
+        log.info("Central Station started. Consuming '{}' from {}", Topics.WEATHER_READINGS, bootstrapServers);
 
         try {
             while (running.get()) {
                 ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(1000));
-
                 for (ConsumerRecord<String, String> record : records) {
-                    WeatherStatusMessage message = JsonUtil.fromJson(record.value(), WeatherStatusMessage.class);
-                    buffer.add(message);
+                    try {
+                        buffer.add(JsonUtil.fromJson(record.value(), WeatherStatusMessage.class));
+                    } catch (RuntimeException e) {
+                        log.error("Invalid weather message at topic={}, partition={}, offset={}; skipping it",
+                                record.topic(), record.partition(), record.offset(), e);
+                    }
                 }
 
                 boolean sizeThresholdHit = buffer.size() >= BATCH_SIZE;
-                boolean timeThresholdHit = !buffer.isEmpty() && (System.currentTimeMillis() - lastFlush) >= FLUSH_INTERVAL_MS;
+                boolean timeThresholdHit = !buffer.isEmpty()
+                        && System.currentTimeMillis() - lastFlush >= FLUSH_INTERVAL_MS;
 
                 if (sizeThresholdHit || timeThresholdHit) {
                     repository.insertBatch(buffer);
@@ -84,7 +75,6 @@ public class CentralStationApp {
                 }
             }
         } finally {
-            // final flush on shutdown so nothing in the buffer is lost
             if (!buffer.isEmpty()) {
                 repository.insertBatch(buffer);
                 consumer.commitSync();
