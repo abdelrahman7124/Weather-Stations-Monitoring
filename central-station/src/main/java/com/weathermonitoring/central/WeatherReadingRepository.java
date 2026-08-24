@@ -23,7 +23,7 @@ public class WeatherReadingRepository implements AutoCloseable {
     private final Connection connection;
 
     public WeatherReadingRepository() throws SQLException {
-        this.connection = DbConfig.getConnection();
+        this.connection = DbConfig.awaitConnection();
         this.connection.setAutoCommit(false);
     }
 
