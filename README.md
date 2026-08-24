@@ -16,13 +16,13 @@ Distributed weather monitoring system for Alexandria University Net Centric Comp
 Central Station          Kafka Streams Rain Detector
         |                      |
         v                      v
-      MySQL               Kafka: rain-alerts
+    PostgreSQL            Kafka: rain-alerts
         |
         v
  Historical SQL analysis
 ```
 
-The application uses Java 17+, Maven, Apache Kafka, Kafka Streams, and MySQL. The mandatory deployment is containerized with Docker and deployed with Kubernetes.
+The application uses Java 17+, Maven, Apache Kafka, Kafka Streams, and PostgreSQL. The mandatory deployment is containerized with Docker and deployed with Kubernetes.
 
 ## Project structure
 
@@ -40,7 +40,7 @@ weather-monitoring/
 │   ├── kafka/
 │   │   ├── zookeeper.yaml
 │   │   └── kafka.yaml
-│   ├── database/mysql.yaml
+│   ├── database/postgres.yaml
 │   ├── weather-stations.yaml
 │   ├── central-station.yaml
 │   ├── rain-detector.yaml
@@ -52,13 +52,13 @@ weather-monitoring/
 
 Each station emits one reading every second. Battery status is generated with the required 30% low / 40% medium / 30% high distribution, and 10% of generated readings are intentionally dropped. `s_no` increments on every station tick, including dropped readings.
 
-Weather readings are produced to `weather-readings` using the station ID as the Kafka key. The Central Station consumes with manual offset commits and writes batches of up to 5,000 records to MySQL. Kafka offsets are committed only after a successful database transaction.
+Weather readings are produced to `weather-readings` using the station ID as the Kafka key. The Central Station consumes with manual offset commits and writes batches of up to 5,000 records to PostgreSQL. Kafka offsets are committed only after a successful database transaction.
 
 The rain detector uses Kafka Streams and publishes an alert to `rain-alerts` whenever humidity is greater than 70%.
 
 ## Local development without Kubernetes
 
-Install Java 17, Maven, Kafka/ZooKeeper, and MySQL. Then:
+Install Java 17, Maven, Kafka/ZooKeeper, and PostgreSQL. Then:
 
 ```bash
 mvn clean package
@@ -79,8 +79,8 @@ The Kubernetes implementation contains:
 
 - 1 ZooKeeper Deployment + Service
 - 1 Kafka Deployment + Service
-- 1 MySQL Deployment + Service
-- 1 MySQL PersistentVolumeClaim
+- 1 PostgreSQL Deployment + Service
+- 1 PostgreSQL PersistentVolumeClaim
 - Kubernetes Secret for the local database password
 - 1 Central Station Deployment + Service
 - 1 Rain Detector Deployment
@@ -143,7 +143,7 @@ docker build -f central-station/Dockerfile -t central-station:latest .
 - [x] Dockerfile for Weather Station
 - [x] Dockerfile for Central Station
 - [x] Kubernetes ZooKeeper + Kafka
-- [x] Kubernetes MySQL + persistent storage
+- [x] Kubernetes PostgreSQL + persistent storage
 - [x] Kubernetes Central Station
 - [x] Kubernetes 10-station deployment
 - [x] Kubernetes Rain Detector

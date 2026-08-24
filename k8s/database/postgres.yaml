@@ -1,0 +1,115 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-secret
+  namespace: weather-monitoring
+type: Opaque
+stringData:
+  POSTGRES_PASSWORD: weatherpg
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  namespace: weather-monitoring
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: weather-monitoring
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_USER
+              value: postgres
+            - name: POSTGRES_DB
+              value: weather_monitoring
+            # The PVC is mounted at /var/lib/postgresql/data, which is not
+            # empty on first use (ext4 puts lost+found there) and would make
+            # initdb refuse to run. Keep the cluster in a subdirectory.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+            - name: schema
+              mountPath: /docker-entrypoint-initdb.d/schema.sql
+              subPath: schema.sql
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres", "-d", "weather_monitoring"]
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres", "-d", "weather_monitoring"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: postgres-pvc
+        - name: schema
+          configMap:
+            name: postgres-schema
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-schema
+  namespace: weather-monitoring
+data:
+  # Applied by the postgres entrypoint on first initialisation only.
+  # Keep in sync with db/schema.sql.
+  schema.sql: |
+    CREATE TABLE IF NOT EXISTS weather_readings (
+      id                BIGSERIAL PRIMARY KEY,
+      station_id        BIGINT      NOT NULL,
+      sequence_number   BIGINT      NOT NULL,
+      battery_status    VARCHAR(10) NOT NULL,
+      timestamp         BIGINT      NOT NULL,
+      humidity          INT         NOT NULL,
+      temperature       INT         NOT NULL,
+      wind_speed        INT         NOT NULL,
+      CONSTRAINT uq_station_sequence UNIQUE (station_id, sequence_number)
+    );
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: weather-monitoring
+spec:
+  selector:
+    app: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432

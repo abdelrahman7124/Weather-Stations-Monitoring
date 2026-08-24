@@ -1,6 +1,6 @@
 # Kubernetes deployment
 
-This deployment satisfies the mandatory Kubernetes part of Lab 4: ZooKeeper, Kafka, MySQL with persistent storage, one Central Station, one Kafka Streams rain detector, and 10 weather-station pods.
+This deployment satisfies the mandatory Kubernetes part of Lab 4: ZooKeeper, Kafka, PostgreSQL with persistent storage, one Central Station, one Kafka Streams rain detector, and 10 weather-station pods.
 
 ## Prerequisites
 
@@ -38,15 +38,15 @@ docker build -f central-station/Dockerfile -t central-station:latest .
 kubectl apply -f k8s/namespace.yaml
 kubectl apply -f k8s/kafka/zookeeper.yaml
 kubectl apply -f k8s/kafka/kafka.yaml
-kubectl apply -f k8s/database/mysql.yaml
+kubectl apply -f k8s/database/postgres.yaml
 ```
 
-Wait for Kafka and MySQL:
+Wait for Kafka and PostgreSQL:
 
 ```bash
 kubectl -n weather-monitoring rollout status deployment/zookeeper
 kubectl -n weather-monitoring rollout status deployment/kafka
-kubectl -n weather-monitoring rollout status deployment/mysql
+kubectl -n weather-monitoring rollout status deployment/postgres
 ```
 
 ## 3. Deploy applications
@@ -90,28 +90,35 @@ kubectl -n weather-monitoring exec deploy/kafka -- \
   --topic rain-alerts --from-beginning
 ```
 
-## 5. Validate MySQL
+## 5. Validate PostgreSQL
 
 ```bash
-kubectl -n weather-monitoring exec deploy/mysql -- \
-  mysql -uroot -pweatherroot weather_monitoring \
-  -e 'SELECT COUNT(*) AS received_messages FROM weather_readings;'
+kubectl -n weather-monitoring exec deploy/postgres -- \
+  psql -U postgres -d weather_monitoring \
+  -c 'SELECT COUNT(*) AS received_messages FROM weather_readings;'
 ```
 
 Battery distribution:
 
 ```bash
-kubectl -n weather-monitoring exec deploy/mysql -- \
-  mysql -uroot -pweatherroot weather_monitoring \
-  -e 'SELECT station_id, battery_status, COUNT(*) AS message_count, ROUND(100 * COUNT(*) / SUM(COUNT(*)) OVER (PARTITION BY station_id), 2) AS percentage FROM weather_readings GROUP BY station_id, battery_status ORDER BY station_id, battery_status;'
+kubectl -n weather-monitoring exec deploy/postgres -- \
+  psql -U postgres -d weather_monitoring \
+  -c 'SELECT station_id, battery_status, COUNT(*) AS message_count, ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (PARTITION BY station_id), 2) AS percentage FROM weather_readings GROUP BY station_id, battery_status ORDER BY station_id, battery_status;'
 ```
 
 Dropped-message estimate:
 
 ```bash
-kubectl -n weather-monitoring exec deploy/mysql -- \
-  mysql -uroot -pweatherroot weather_monitoring \
-  -e 'SELECT station_id, MAX(sequence_number) AS expected_messages, COUNT(*) AS received_messages, MAX(sequence_number)-COUNT(*) AS dropped_messages, ROUND(100*(MAX(sequence_number)-COUNT(*))/MAX(sequence_number),2) AS drop_rate_percent FROM weather_readings GROUP BY station_id ORDER BY station_id;'
+kubectl -n weather-monitoring exec deploy/postgres -- \
+  psql -U postgres -d weather_monitoring \
+  -c 'SELECT station_id, MAX(sequence_number) AS expected_messages, COUNT(*) AS received_messages, MAX(sequence_number)-COUNT(*) AS dropped_messages, ROUND(100.0*(MAX(sequence_number)-COUNT(*))/MAX(sequence_number),2) AS drop_rate_percent FROM weather_readings GROUP BY station_id ORDER BY station_id;'
+```
+
+Or run the checked-in query file directly:
+
+```bash
+kubectl -n weather-monitoring exec -i deploy/postgres -- \
+  psql -U postgres -d weather_monitoring < db/analysis_queries.sql
 ```
 
 ## 6. Useful debugging commands
@@ -121,6 +128,7 @@ kubectl -n weather-monitoring logs statefulset/weather-station --tail=50
 kubectl -n weather-monitoring logs deployment/central-station --tail=100
 kubectl -n weather-monitoring logs deployment/rain-detector --tail=100
 kubectl -n weather-monitoring describe pod weather-station-0
+kubectl -n weather-monitoring logs deployment/postgres --tail=50
 ```
 
 ## Important note about the image tags
@@ -141,4 +149,4 @@ name, so every `KAFKA_CFG_*` environment variable behaves as before.
 
 The manifests use `imagePullPolicy: IfNotPresent`, so the commands above are intended for Minikube/local images. For a remote Kubernetes cluster, push the images to a registry and replace the image names in the manifests with the registry-qualified names.
 
-The MySQL password in this mandatory local lab deployment is a demo credential stored in a Kubernetes Secret manifest. Do not reuse it for the cloud bonus; use a generated secret or managed database credentials there.
+The PostgreSQL password in this mandatory local lab deployment is a demo credential stored in a Kubernetes Secret manifest. Do not reuse it for the cloud bonus; use a generated secret or managed database credentials there.
