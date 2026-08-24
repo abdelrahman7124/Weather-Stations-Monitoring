@@ -38,4 +38,7 @@ metadata:
 spec:
   selector:
     app: central-station
-  ports: []
+  ports:
+    - name: app
+      port: 8080
+      targetPort: 8080
