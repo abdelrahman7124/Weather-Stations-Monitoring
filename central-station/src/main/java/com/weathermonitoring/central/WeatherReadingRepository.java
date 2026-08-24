@@ -9,11 +9,7 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.List;
 
-/**
- * Handles batch inserts of weather readings into MySQL.
- * A single JDBC connection is reused; each flush() runs one batch insert
- * inside a transaction to keep I/O low (recommended batch size: 5000).
- */
+/** Handles transactional batch inserts of weather readings into MySQL. */
 public class WeatherReadingRepository implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(WeatherReadingRepository.class);
@@ -21,7 +17,8 @@ public class WeatherReadingRepository implements AutoCloseable {
     private static final String INSERT_SQL =
             "INSERT INTO weather_readings " +
             "(station_id, sequence_number, battery_status, timestamp, humidity, temperature, wind_speed) " +
-            "VALUES (?, ?, ?, ?, ?, ?, ?)";
+            "VALUES (?, ?, ?, ?, ?, ?, ?) " +
+            "ON DUPLICATE KEY UPDATE id = id";
 
     private final Connection connection;
 
@@ -31,12 +28,15 @@ public class WeatherReadingRepository implements AutoCloseable {
     }
 
     /**
-     * Inserts a batch of readings in a single round trip / transaction.
+     * Inserts a batch in one transaction. A failed batch is rolled back and
+     * the exception is propagated so the Kafka consumer does not commit the
+     * corresponding offsets.
      */
-    public void insertBatch(List<WeatherStatusMessage> batch) {
+    public void insertBatch(List<WeatherStatusMessage> batch) throws SQLException {
         if (batch.isEmpty()) {
             return;
         }
+
         try (PreparedStatement ps = connection.prepareStatement(INSERT_SQL)) {
             for (WeatherStatusMessage m : batch) {
                 ps.setLong(1, m.getStationId());
@@ -56,8 +56,9 @@ public class WeatherReadingRepository implements AutoCloseable {
             try {
                 connection.rollback();
             } catch (SQLException rollbackEx) {
-                log.error("Rollback failed", rollbackEx);
+                e.addSuppressed(rollbackEx);
             }
+            throw e;
         }
     }
 
