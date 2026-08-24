@@ -125,6 +125,20 @@ kubectl -n weather-monitoring describe pod weather-station-0
 
 ## Important note about the image tags
 
+### Kafka and ZooKeeper come from `bitnamilegacy`
+
+In August 2025 Bitnami removed every non-`latest` tag from its Docker Hub
+repositories and republished the versioned images under `bitnamilegacy/`.
+`bitnami/kafka` and `bitnami/zookeeper` now list **zero** tags, so the
+`bitnami/kafka:3.7` and `bitnami/zookeeper:3.9` references this project
+originally used fail with `ImagePullBackOff`.
+
+The manifests therefore pull `bitnamilegacy/kafka:3.7` and
+`bitnamilegacy/zookeeper:3.9`. These are the identical images under a new
+name, so every `KAFKA_CFG_*` environment variable behaves as before.
+
+### Local image tags
+
 The manifests use `imagePullPolicy: IfNotPresent`, so the commands above are intended for Minikube/local images. For a remote Kubernetes cluster, push the images to a registry and replace the image names in the manifests with the registry-qualified names.
 
 The MySQL password in this mandatory local lab deployment is a demo credential stored in a Kubernetes Secret manifest. Do not reuse it for the cloud bonus; use a generated secret or managed database credentials there.
