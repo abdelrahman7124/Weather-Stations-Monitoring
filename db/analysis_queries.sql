@@ -1,4 +1,6 @@
-USE weather_monitoring;
+-- Historical analysis queries (Lab 4, Part E).
+-- Run against the weather_monitoring database:
+--   psql -h <host> -U <user> -d weather_monitoring -f db/analysis_queries.sql
 
 -- ============================================================
 -- 1. Battery status distribution per station
@@ -8,7 +10,10 @@ SELECT
     station_id,
     battery_status,
     COUNT(*) AS message_count,
-    ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (PARTITION BY station_id), 2) AS percentage
+    ROUND(
+        100.0 * COUNT(*) / SUM(COUNT(*)) OVER (PARTITION BY station_id),
+        2
+    ) AS percentage
 FROM weather_readings
 GROUP BY station_id, battery_status
 ORDER BY station_id, battery_status;
@@ -24,10 +29,13 @@ ORDER BY station_id, battery_status;
 -- ============================================================
 SELECT
     station_id,
-    MAX(sequence_number)                                        AS expected_messages,
-    COUNT(*)                                                     AS received_messages,
-    MAX(sequence_number) - COUNT(*)                              AS dropped_messages,
-    ROUND(100.0 * (MAX(sequence_number) - COUNT(*)) / MAX(sequence_number), 2) AS drop_rate_percent
+    MAX(sequence_number)                        AS expected_messages,
+    COUNT(*)                                    AS received_messages,
+    MAX(sequence_number) - COUNT(*)             AS dropped_messages,
+    ROUND(
+        100.0 * (MAX(sequence_number) - COUNT(*)) / MAX(sequence_number),
+        2
+    ) AS drop_rate_percent
 FROM weather_readings
 GROUP BY station_id
 ORDER BY station_id;

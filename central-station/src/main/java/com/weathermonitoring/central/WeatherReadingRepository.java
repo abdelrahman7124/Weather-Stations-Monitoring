@@ -9,7 +9,7 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.List;
 
-/** Handles transactional batch inserts of weather readings into MySQL. */
+/** Handles transactional batch inserts of weather readings into PostgreSQL. */
 public class WeatherReadingRepository implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(WeatherReadingRepository.class);
@@ -18,7 +18,7 @@ public class WeatherReadingRepository implements AutoCloseable {
             "INSERT INTO weather_readings " +
             "(station_id, sequence_number, battery_status, timestamp, humidity, temperature, wind_speed) " +
             "VALUES (?, ?, ?, ?, ?, ?, ?) " +
-            "ON DUPLICATE KEY UPDATE id = id";
+            "ON CONFLICT (station_id, sequence_number) DO NOTHING";
 
     private final Connection connection;
 
