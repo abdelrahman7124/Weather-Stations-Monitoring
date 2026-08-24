@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rain-detector
+  namespace: weather-monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rain-detector
+  template:
+    metadata:
+      labels:
+        app: rain-detector
+    spec:
+      containers:
+        - name: rain-detector
+          image: central-station:latest
+          imagePullPolicy: IfNotPresent
+          command: ["java"]
+          args: ["-cp", "/app/central-station.jar", "com.weathermonitoring.central.RainDetectorApp"]
+          env:
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: kafka:9092
