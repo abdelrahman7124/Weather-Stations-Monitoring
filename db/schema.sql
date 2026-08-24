@@ -1,5 +1,4 @@
--- Run this once against your MySQL database (weather_monitoring)
-
+-- Run this once against MySQL.
 CREATE DATABASE IF NOT EXISTS weather_monitoring
     CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -16,5 +15,6 @@ CREATE TABLE IF NOT EXISTS weather_readings (
     wind_speed        INT NOT NULL,
 
     INDEX idx_station_id (station_id),
-    INDEX idx_station_seq (station_id, sequence_number)
+    INDEX idx_station_seq (station_id, sequence_number),
+    UNIQUE KEY uq_station_sequence (station_id, sequence_number)
 );
