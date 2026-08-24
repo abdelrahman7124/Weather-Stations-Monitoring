@@ -1,0 +1,51 @@
+# Weather Stations VM.
+#
+# Runs all ten stations as separate containers. They hold no state and no
+# credentials; they only need to reach the Kafka broker on the central VM.
+#
+#   docker compose -f cloud/docker-compose.stations.yml up -d --build
+
+name: weather-stations
+
+x-station: &station
+  build:
+    context: ..
+    dockerfile: weather-station/Dockerfile
+  image: weather-station:latest
+  restart: unless-stopped
+  mem_limit: 192m
+
+x-station-env: &station-env
+  KAFKA_BOOTSTRAP_SERVERS: "${CENTRAL_PUBLIC_IP:?set CENTRAL_PUBLIC_IP in cloud/.env}:9092"
+
+services:
+  station-1:
+    <<: *station
+    environment: {<<: *station-env, STATION_ID: "1"}
+  station-2:
+    <<: *station
+    environment: {<<: *station-env, STATION_ID: "2"}
+  station-3:
+    <<: *station
+    environment: {<<: *station-env, STATION_ID: "3"}
+  station-4:
+    <<: *station
+    environment: {<<: *station-env, STATION_ID: "4"}
+  station-5:
+    <<: *station
+    environment: {<<: *station-env, STATION_ID: "5"}
+  station-6:
+    <<: *station
+    environment: {<<: *station-env, STATION_ID: "6"}
+  station-7:
+    <<: *station
+    environment: {<<: *station-env, STATION_ID: "7"}
+  station-8:
+    <<: *station
+    environment: {<<: *station-env, STATION_ID: "8"}
+  station-9:
+    <<: *station
+    environment: {<<: *station-env, STATION_ID: "9"}
+  station-10:
+    <<: *station
+    environment: {<<: *station-env, STATION_ID: "10"}

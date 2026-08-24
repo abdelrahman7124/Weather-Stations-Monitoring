@@ -1,0 +1,72 @@
+# Central Base Station VM.
+#
+# Runs ZooKeeper, the Kafka broker, the Central Station consumer and the
+# Kafka Streams rain detector. Weather stations run on a separate VM and
+# reach the broker over the public network.
+#
+#   docker compose -f cloud/docker-compose.central.yml up -d --build
+
+name: weather-central
+
+services:
+  zookeeper:
+    image: bitnamilegacy/zookeeper:3.9
+    restart: unless-stopped
+    environment:
+      ALLOW_ANONYMOUS_LOGIN: "yes"
+    mem_limit: 512m
+
+  kafka:
+    image: bitnamilegacy/kafka:3.7
+    restart: unless-stopped
+    depends_on: [zookeeper]
+    ports:
+      # Only the external listener is published. 9093 stays on the compose
+      # network and is never exposed to the internet.
+      - "9092:9092"
+    environment:
+      KAFKA_CFG_BROKER_ID: "1"
+      KAFKA_CFG_ZOOKEEPER_CONNECT: zookeeper:2181
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+      # Two listeners. Containers on this VM bootstrap over INTERNAL and stay
+      # inside the compose network; the remote stations bootstrap over
+      # EXTERNAL. A single listener advertising the public IP would force the
+      # local containers to hairpin out to the VM's own public address, which
+      # AWS does not route back to the instance.
+      KAFKA_CFG_LISTENERS: INTERNAL://:9093,EXTERNAL://:9092
+      KAFKA_CFG_ADVERTISED_LISTENERS: INTERNAL://kafka:9093,EXTERNAL://${CENTRAL_PUBLIC_IP:?set CENTRAL_PUBLIC_IP in cloud/.env}:9092
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_CFG_NUM_PARTITIONS: "3"
+      KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+    mem_limit: 1g
+
+  central-station:
+    build:
+      context: ..
+      dockerfile: central-station/Dockerfile
+    image: central-station:latest
+    restart: unless-stopped
+    depends_on: [kafka]
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9093
+      DB_URL: ${DB_URL:?set DB_URL in cloud/.env}
+      DB_USER: ${DB_USER:?set DB_USER in cloud/.env}
+      DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in cloud/.env}
+    mem_limit: 512m
+
+  rain-detector:
+    image: central-station:latest
+    restart: unless-stopped
+    depends_on: [kafka, central-station]
+    command:
+      - "-XX:MaxRAMPercentage=75.0"
+      - "-cp"
+      - "/app/central-station.jar"
+      - "com.weathermonitoring.central.RainDetectorApp"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9093
+    mem_limit: 640m
