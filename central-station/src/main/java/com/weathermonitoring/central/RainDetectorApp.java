@@ -7,6 +7,7 @@ import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.KafkaStreams;
 import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.StreamsConfig;
+import org.apache.kafka.streams.errors.StreamsUncaughtExceptionHandler;
 import org.apache.kafka.streams.kstream.KStream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,7 +34,8 @@ public class RainDetectorApp {
         KStream<String, String> readings = builder.stream(Topics.WEATHER_READINGS);
 
         readings
-                .mapValues(value -> JsonUtil.fromJson(value, WeatherStatusMessage.class))
+                .mapValues(RainDetectorApp::parseOrNull)
+                .filter((key, message) -> message != null && message.getWeather() != null)
                 .filter((key, message) -> message.getWeather().getHumidity() > HUMIDITY_THRESHOLD)
                 .mapValues(message -> {
                     log.info("Rain detected at station {} (humidity={}%)",
@@ -46,8 +48,27 @@ public class RainDetectorApp {
                 .to(Topics.RAIN_ALERTS);
 
         KafkaStreams streams = new KafkaStreams(builder.build(), props);
+        streams.setUncaughtExceptionHandler(
+                exception -> {
+                    log.error("Rain detector stream thread died; replacing it", exception);
+                    return StreamsUncaughtExceptionHandler.StreamThreadExceptionResponse.REPLACE_THREAD;
+                });
         Runtime.getRuntime().addShutdownHook(new Thread(streams::close));
         log.info("Rain Detector started. Watching humidity > {}%", HUMIDITY_THRESHOLD);
         streams.start();
+    }
+
+    /**
+     * A record the producer never wrote, or wrote in an older shape, must not
+     * be able to stop rain detection for every station. Returns null so the
+     * topology can filter the record out.
+     */
+    private static WeatherStatusMessage parseOrNull(String value) {
+        try {
+            return JsonUtil.fromJson(value, WeatherStatusMessage.class);
+        } catch (RuntimeException e) {
+            log.error("Skipping malformed weather message: {}", value, e);
+            return null;
+        }
     }
 }
