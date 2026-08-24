@@ -1,91 +1,86 @@
 # Cloud deployment (Bonus A, B and C)
 
-Deploys the system across **two Oracle Cloud Infrastructure (OCI) compute
-instances** without Kubernetes, against an **Aiven managed PostgreSQL**
-database. This file covers provisioning and running; the evidence you
-capture along the way is what Bonus C asks you to put in the report.
+Deploys the system across **two Microsoft Azure virtual machines** without
+Kubernetes, against an **Aiven managed PostgreSQL** database. This file
+covers provisioning and running; the evidence you capture along the way is
+what Bonus C asks you to put in the report.
 
 ```text
-   Stations VM (OCI)                Central VM (OCI)              Aiven
+   Stations VM (Azure)              Central VM (Azure)            Aiven
  ┌──────────────────┐            ┌────────────────────┐      ┌────────────┐
  │ station-1 … -10  │ ─9092─────▶│ ZooKeeper + Kafka  │      │ PostgreSQL │
- │ (10 containers)  │  public    │ Central Station    │─5432▶│  (managed) │
+ │ (10 containers)  │  VNet      │ Central Station    │─5432▶│  (managed) │
  └──────────────────┘            │ Rain Detector      │ TLS  └────────────┘
                                  └────────────────────┘
 ```
 
-## Why Oracle Cloud
+## Why Azure for Students
 
-The Always Free tier includes an **Ampere A1 (ARM) allowance of 4 OCPUs and
-24 GB of RAM**, which can be split across up to four instances and does not
-expire. That is enough to run both machines properly, for free, instead of
-squeezing ten JVMs into AWS's 1 GiB `t3.micro`.
+[Azure for Students](https://azure.microsoft.com/en-us/free/students) grants
+**$100 of credit with no credit card**, verified with an academic email.
+That matters here: Oracle Cloud and AWS both require a payment card for
+identity verification, and the AWS free tier's 1 GiB instances cannot hold
+ten JVMs anyway.
 
-All five images this project uses — `bitnamilegacy/kafka`,
-`bitnamilegacy/zookeeper`, `postgres`, `maven:3.9.9-eclipse-temurin-17` and
-`eclipse-temurin:17-jre` — publish `linux/arm64` variants, so everything
-runs natively on Ampere with no emulation.
+### The 3 vCPU ceiling
 
-## 1. Instance shapes
+Azure for Students subscriptions are capped at **3 vCPUs in total**, and
+free subscriptions are not eligible for quota increases. Both machines must
+therefore fit inside 3 vCPUs. The free-hours sizes (`B1s`, `B2ats_v2`,
+`B2pts_v2`) all carry only 1 GiB of RAM, which is not enough, so this guide
+uses slightly larger burstable sizes paid out of the $100 credit — a few
+hours of running costs well under a dollar.
 
-Split the free Ampere allowance evenly:
-
-| Role | Shape | OCPU / RAM | Image |
+| Role | Size | vCPU / RAM | Why |
 |---|---|---|---|
-| Weather stations | `VM.Standard.A1.Flex` | 2 / 12 GB | Ubuntu 22.04 or 24.04 (aarch64) |
-| Central station | `VM.Standard.A1.Flex` | 2 / 12 GB | Ubuntu 22.04 or 24.04 (aarch64) |
+| Weather stations | `Standard_B1ms` | 1 / 2 GiB | Ten stations measured at ~78 MiB each |
+| Central station | `Standard_B2s` | 2 / 4 GiB | Kafka and ZooKeeper are the memory-hungry pair |
 
-That is exactly the Always Free allocation, so neither instance costs
-anything. Default 50 GB boot volumes are fine and stay inside the free
-200 GB block-storage limit.
+That is exactly 3 vCPUs. Check your own quota before creating anything:
+**Subscription → Usage + quotas → Compute**. If yours is lower than 3, use
+`Standard_B1ms` for both and expect the stations VM to be slower to start.
 
-> **"Out of host capacity."** Ampere A1 is frequently exhausted in busy
-> regions and this is the single most common blocker. If you hit it, try a
-> different availability domain, try again later, or pick a less
-> oversubscribed home region. Retrying is normal; it is not a
-> misconfiguration on your side.
+## 1. Create the virtual machines
+
+Portal → **Virtual machines → Create → Azure virtual machine**. Create the
+**central VM first** so the stations VM can join the network it creates.
+
+Both machines:
+
+- **Image**: Ubuntu Server 24.04 LTS — x64 Gen2
+- **Authentication**: SSH public key. Paste the output of `cat ~/.ssh/id_ed25519.pub`
+- **Inbound ports**: allow **SSH (22)** only
+- **Virtual network**: central VM creates one; put the stations VM in the
+  **same VNet and subnet**
+
+Name them `weather-central` (`Standard_B2s`) and `weather-stations`
+(`Standard_B1ms`). The default admin username is `azureuser`.
 
 ## 2. Networking
 
-OCI needs the port opened in **two** places. Missing the second one is the
-classic OCI mistake — the security list looks correct and traffic still
-never arrives.
+Because both VMs sit in one virtual network, the stations reach the broker
+over its **private** IP. Azure's default `AllowVnetInBound` NSG rule already
+permits that, so **port 9092 never has to be exposed to the internet** and
+no extra inbound rule is needed.
 
-### 2a. VCN security list (or Network Security Group)
+Note the central VM's **private** IP from its Overview page — that is the
+value `CENTRAL_HOST` takes.
 
-On the VCN your instances live in, add **ingress** rules:
+Screenshot the NSG's inbound rules. Showing SSH restricted and 9092 absent
+is a stronger answer to the Bonus C "network configuration" item than
+opening the port would be: the broker is unreachable from outside the VNet
+by construction.
 
-| Applies to | Source | Protocol / Port | Purpose |
-|---|---|---|---|
-| Central VM subnet | your IP `/32` | TCP 22 | Administration |
-| Central VM subnet | stations VM public IP `/32` | TCP 9092 | Kafka external listener |
-| Stations VM subnet | your IP `/32` | TCP 22 | Administration |
-
-Egress stays at the default allow-all, which is what lets the stations
-reach 9092 and the central VM reach Aiven on 5432.
-
-### 2b. The instance firewall
-
-OCI's Ubuntu images ship with an iptables ruleset that rejects everything
-except SSH. Opening 9092 in the security list is **not** sufficient. On the
-**central VM** only:
-
-```bash
-sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 9092 -j ACCEPT
-sudo apt-get install -y iptables-persistent
-sudo netfilter-persistent save
-```
-
-Without `netfilter-persistent save` the rule disappears on reboot.
-
-Screenshot both the security list rules and `sudo iptables -L INPUT -n
---line-numbers` — together they are the "network configuration" item
-Bonus C asks for.
+> Deploying the two VMs to **separate** virtual networks instead is also
+> valid, and closer to the lab's wording about remote connection. In that
+> case set `CENTRAL_HOST` to the central VM's public IP and add an inbound
+> NSG rule on the central VM for TCP 9092 whose source is the stations VM's
+> public IP `/32` — never `Any`.
 
 ## 3. Aiven PostgreSQL
 
-1. Create a **PostgreSQL** service on the **Free** plan. Pick a region near
-   your OCI region.
+1. Create a **PostgreSQL** service on the **Free** plan, in a region near
+   your Azure region.
 2. From *Overview*, copy the host, port, database name, user and password.
 3. Under *Allowed IP addresses*, add the **central VM's public IP `/32`**.
    The stations never talk to the database and must not be allowlisted.
@@ -101,7 +96,11 @@ Capture the `CREATE TABLE` output and the service's "Running" status page.
 
 ## 4. Provision both VMs
 
-Run on **each** instance:
+```bash
+ssh azureuser@<vm-public-ip>
+```
+
+Then on **each** instance:
 
 ```bash
 sudo apt-get update
@@ -114,11 +113,9 @@ cp cloud/.env.example cloud/.env
 
 Then edit `cloud/.env`:
 
-- **Both VMs** — set `CENTRAL_PUBLIC_IP` to the central instance's public
-  IPv4 address. Reserve the IP in the OCI console if you plan to stop and
-  restart the instance, otherwise it changes and the stations silently stop
-  delivering.
-- **Central VM only** — set `DB_URL`, `DB_USER`, `DB_PASSWORD` from Aiven.
+- **Both VMs** — `CENTRAL_HOST` = the central VM's **private** IP (or its
+  public IP if you split the VNets).
+- **Central VM only** — `DB_URL`, `DB_USER`, `DB_PASSWORD` from Aiven.
   `DB_URL` must end in `?sslmode=require`.
 
 `cloud/.env` is gitignored, so credentials never enter the repository. That
@@ -134,8 +131,8 @@ docker compose -f cloud/docker-compose.central.yml up -d --build
 docker compose -f cloud/docker-compose.central.yml ps
 ```
 
-The first build compiles the project inside the container and takes a few
-minutes. Then confirm:
+The first build compiles the project inside the container and takes several
+minutes on a burstable VM. Then confirm:
 
 ```bash
 docker compose -f cloud/docker-compose.central.yml logs kafka | grep -i started
@@ -157,6 +154,12 @@ docker compose -f cloud/docker-compose.stations.yml logs -f station-1
 
 You should see `Station 1 sent s_no=… battery=… humidity=…` about once a
 second, with the occasional `DROPPED message`.
+
+Check memory has room to spare — expect roughly 800 MiB in use of 2 GiB:
+
+```bash
+free -h && docker stats --no-stream --format 'table {{.Name}}\t{{.MemUsage}}'
+```
 
 ## 7. Verify end to end
 
@@ -189,16 +192,15 @@ Then the Part E analysis:
 docker run --rm -i postgres:16 psql "$AIVEN_URL" < db/analysis_queries.sql
 ```
 
-Let it run ~20 minutes before capturing the analysis queries, so the
-battery split has converged near 30/40/30.
+Let it run ~20 minutes before capturing the analysis queries, so the battery
+split has converged near 30/40/30.
 
 ## 8. Evidence checklist for the report
 
 Bonus C is graded on the write-up, so collect these as you go:
 
-- [ ] OCI console showing **two running instances**, with shape and OCPU/RAM
-- [ ] VCN security list ingress rules
-- [ ] `sudo iptables -L INPUT -n --line-numbers` on the central VM
+- [ ] Azure portal showing **two running VMs**, with size and region
+- [ ] NSG inbound rules for both VMs
 - [ ] Aiven service overview (plan, region, "Running")
 - [ ] Aiven allowed-IP list showing only the central VM
 - [ ] `docker compose ps` on **each** VM
@@ -210,41 +212,40 @@ Bonus C is graded on the write-up, so collect these as you go:
 
 ## 9. Tear down
 
-The Ampere instances are Always Free and cost nothing if you leave them,
-but the Aiven free plan and your own tidiness argue for stopping:
+Azure bills the credit for as long as the VMs exist, so stop them when done:
 
 ```bash
 docker compose -f cloud/docker-compose.stations.yml down
 docker compose -f cloud/docker-compose.central.yml down
 ```
 
-Terminate both instances in the OCI console if you want the Ampere
-allowance back, and power off the Aiven service.
+Then **Stop (deallocate)** both VMs in the portal — a merely "stopped" VM
+still bills. Delete the resource group to remove everything at once, and
+power off the Aiven service.
 
 ## Troubleshooting
 
 **Stations log `Connection to node -1 could not be established` forever.**
-The broker is unreachable on 9092. Check in order: `CENTRAL_PUBLIC_IP`
-matches the current public IP; the VCN security list allows 9092 from the
-stations VM; and — most likely — the iptables rule from §2b is present on
-the central VM. Verify with `sudo iptables -L INPUT -n --line-numbers`.
+The broker is unreachable on 9092. Check `CENTRAL_HOST` matches the central
+VM's current IP, that both VMs really are in the same VNet, and — if you
+split the VNets — that the NSG rule for 9092 exists.
 
 **Stations connect, then time out sending.** Advertised-listener problem:
-the broker handed back an address the stations cannot reach. Confirm it
-resolved to the real public IP:
+the broker handed back an address the stations cannot reach. Confirm what it
+resolved to:
 
 ```bash
 docker compose -f cloud/docker-compose.central.yml exec kafka env | grep ADVERTISED
 ```
 
 **Central station exits with an SSL or authentication error.** Aiven
-requires TLS — `DB_URL` must end in `?sslmode=require`. If it instead
-cannot connect at all, the central VM's IP is missing from the Aiven
-allowlist.
+requires TLS — `DB_URL` must end in `?sslmode=require`. If it cannot connect
+at all, the central VM's public IP is missing from the Aiven allowlist.
 
-**`exec format error` when a container starts.** An amd64-only image was
-pulled onto ARM. All images this project uses have arm64 variants; if you
-changed a tag, check it with `docker manifest inspect <image>`.
+**A station container is killed and restarts repeatedly.** The stations VM
+is out of memory. Each station needs ~78 MiB; ten plus the OS fit 2 GiB with
+room to spare, so suspect a size smaller than `Standard_B1ms`.
 
-**"Out of host capacity" creating the instance.** See §1 — retry, change
-availability domain, or change region.
+**"This size is not available in this region" or a quota error.** See the
+3 vCPU ceiling above — check Subscription → Usage + quotas, and try another
+region if the size is simply unavailable.

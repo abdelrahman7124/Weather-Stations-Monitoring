@@ -45,7 +45,7 @@ weather-monitoring/
 │   ├── central-station.yaml
 │   ├── rain-detector.yaml
 │   └── README.md
-├── cloud/                        # Oracle Cloud two-VM bonus deployment
+├── cloud/                        # Azure two-VM bonus deployment
 │   ├── docker-compose.central.yml
 │   ├── docker-compose.stations.yml
 │   ├── .env.example
@@ -98,11 +98,11 @@ See [`k8s/README.md`](k8s/README.md) for the exact Minikube build, deployment, a
 ## Cloud deployment — bonus
 
 [`cloud/README.md`](cloud/README.md) deploys the same system across two
-Oracle Cloud Ampere (ARM) instances without Kubernetes, writing to a managed
+Microsoft Azure virtual machines without Kubernetes, writing to a managed
 Aiven PostgreSQL database. Stations run on one VM, Kafka and the central
 station on the other, and all configuration comes from a gitignored
-`cloud/.env`. Both instances fit inside OCI's Always Free allowance, so the
-bonus costs nothing to run.
+`cloud/.env`. Azure for Students provides the credit without requiring a
+payment card, within a 3 vCPU subscription cap that dictates the VM sizes.
 
 ## SQL analysis
 
@@ -168,8 +168,8 @@ Mandatory:
 
 Bonus:
 
-- [x] Two-VM deployment assets (Oracle Cloud, no Kubernetes) — `cloud/`
+- [x] Two-VM deployment assets (Azure, no Kubernetes) — `cloud/`
 - [x] Managed-database configuration with no secrets in source
-- [ ] Provision the two OCI instances and the Aiven service
+- [ ] Provision the two Azure VMs and the Aiven service
 - [ ] Capture the cloud evidence listed in [`cloud/README.md`](cloud/README.md)
 - [ ] Write the Cloud Deployment section of the report

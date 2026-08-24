@@ -16,7 +16,7 @@ x-station: &station
   mem_limit: 192m
 
 x-station-env: &station-env
-  KAFKA_BOOTSTRAP_SERVERS: "${CENTRAL_PUBLIC_IP:?set CENTRAL_PUBLIC_IP in cloud/.env}:9092"
+  KAFKA_BOOTSTRAP_SERVERS: "${CENTRAL_HOST:?set CENTRAL_HOST in cloud/.env}:9092"
 
 services:
   station-1:
