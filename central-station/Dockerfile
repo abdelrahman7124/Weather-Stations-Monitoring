@@ -4,6 +4,9 @@ COPY pom.xml .
 COPY common/pom.xml common/pom.xml
 COPY common/src common/src
 COPY central-station/pom.xml central-station/pom.xml
+# Reactor sibling: its pom must exist for Maven to read the parent, even
+# though -pl central-station never builds it.
+COPY weather-station/pom.xml weather-station/pom.xml
 COPY central-station/src central-station/src
 RUN mvn -pl central-station -am clean package -DskipTests
 
