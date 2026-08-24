@@ -1,12 +1,12 @@
 # Cloud deployment (Bonus A, B and C)
 
-Deploys the system across **two AWS EC2 instances** without Kubernetes,
-against an **Aiven managed PostgreSQL** database. This file covers the
-provisioning and run steps; the evidence you capture along the way is what
-Bonus C asks you to paste into the report.
+Deploys the system across **two Oracle Cloud Infrastructure (OCI) compute
+instances** without Kubernetes, against an **Aiven managed PostgreSQL**
+database. This file covers provisioning and running; the evidence you
+capture along the way is what Bonus C asks you to put in the report.
 
 ```text
-   Stations VM (EC2)                Central VM (EC2)              Aiven
+   Stations VM (OCI)                Central VM (OCI)              Aiven
  ┌──────────────────┐            ┌────────────────────┐      ┌────────────┐
  │ station-1 … -10  │ ─9092─────▶│ ZooKeeper + Kafka  │      │ PostgreSQL │
  │ (10 containers)  │  public    │ Central Station    │─5432▶│  (managed) │
@@ -14,57 +14,87 @@ Bonus C asks you to paste into the report.
                                  └────────────────────┘
 ```
 
-## 1. Instance sizing
+## Why Oracle Cloud
 
-| Role | Instance type | vCPU / RAM | Why |
+The Always Free tier includes an **Ampere A1 (ARM) allowance of 4 OCPUs and
+24 GB of RAM**, which can be split across up to four instances and does not
+expire. That is enough to run both machines properly, for free, instead of
+squeezing ten JVMs into AWS's 1 GiB `t3.micro`.
+
+All five images this project uses — `bitnamilegacy/kafka`,
+`bitnamilegacy/zookeeper`, `postgres`, `maven:3.9.9-eclipse-temurin-17` and
+`eclipse-temurin:17-jre` — publish `linux/arm64` variants, so everything
+runs natively on Ampere with no emulation.
+
+## 1. Instance shapes
+
+Split the free Ampere allowance evenly:
+
+| Role | Shape | OCPU / RAM | Image |
 |---|---|---|---|
-| Weather stations | `t3.small` | 2 / 2 GiB | Ten JVMs at ~150 MiB each |
-| Central station | `t3.medium` | 2 / 4 GiB | Kafka + ZooKeeper + two JVMs, one with RocksDB |
+| Weather stations | `VM.Standard.A1.Flex` | 2 / 12 GB | Ubuntu 22.04 or 24.04 (aarch64) |
+| Central station | `VM.Standard.A1.Flex` | 2 / 12 GB | Ubuntu 22.04 or 24.04 (aarch64) |
 
-Use Ubuntu Server 24.04 LTS (x86_64) on both, 20 GiB gp3 root volumes.
+That is exactly the Always Free allocation, so neither instance costs
+anything. Default 50 GB boot volumes are fine and stay inside the free
+200 GB block-storage limit.
 
-> **The free tier is not big enough.** `t3.micro` gives you 1 GiB, and ten
-> JVMs plus the OS will not fit — the kernel OOM-killer starts reaping
-> station containers. `t3.small` + `t3.medium` run about **$0.06/hour
-> combined** in `us-east-1`. Start them, capture your evidence, then
-> terminate. If you would rather stay strictly inside the free tier, run
-> 3 stations instead of 10 on a `t3.micro` and say so in the report.
+> **"Out of host capacity."** Ampere A1 is frequently exhausted in busy
+> regions and this is the single most common blocker. If you hit it, try a
+> different availability domain, try again later, or pick a less
+> oversubscribed home region. Retrying is normal; it is not a
+> misconfiguration on your side.
 
-## 2. Security groups
+## 2. Networking
 
-Create two groups. Keep the broker port closed to the world — reference
-the other group by ID, not by CIDR.
+OCI needs the port opened in **two** places. Missing the second one is the
+classic OCI mistake — the security list looks correct and traffic still
+never arrives.
 
-**`weather-central-sg`** (Central VM)
+### 2a. VCN security list (or Network Security Group)
 
-| Type | Port | Source | Purpose |
+On the VCN your instances live in, add **ingress** rules:
+
+| Applies to | Source | Protocol / Port | Purpose |
 |---|---|---|---|
-| SSH | 22 | *your* IP `/32` | Administration |
-| Custom TCP | 9092 | `weather-stations-sg` | Kafka external listener |
+| Central VM subnet | your IP `/32` | TCP 22 | Administration |
+| Central VM subnet | stations VM public IP `/32` | TCP 9092 | Kafka external listener |
+| Stations VM subnet | your IP `/32` | TCP 22 | Administration |
 
-**`weather-stations-sg`** (Stations VM)
-
-| Type | Port | Source | Purpose |
-|---|---|---|---|
-| SSH | 22 | *your* IP `/32` | Administration |
-
-Outbound stays at the default allow-all, which is what lets the stations
+Egress stays at the default allow-all, which is what lets the stations
 reach 9092 and the central VM reach Aiven on 5432.
 
-Screenshot both inbound rule tables — that is the "network configuration"
-item Bonus C asks for.
+### 2b. The instance firewall
+
+OCI's Ubuntu images ship with an iptables ruleset that rejects everything
+except SSH. Opening 9092 in the security list is **not** sufficient. On the
+**central VM** only:
+
+```bash
+sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 9092 -j ACCEPT
+sudo apt-get install -y iptables-persistent
+sudo netfilter-persistent save
+```
+
+Without `netfilter-persistent save` the rule disappears on reboot.
+
+Screenshot both the security list rules and `sudo iptables -L INPUT -n
+--line-numbers` — together they are the "network configuration" item
+Bonus C asks for.
 
 ## 3. Aiven PostgreSQL
 
-1. Create a **PostgreSQL** service on the free plan.
-2. Under *Overview*, copy the host, port, database name, user and password.
-3. Under *Allowed IP addresses*, add the **Central VM's public IP `/32`**.
-   The stations never connect to the database and must not be allowlisted.
-4. Load the schema from your laptop (or the central VM):
+1. Create a **PostgreSQL** service on the **Free** plan. Pick a region near
+   your OCI region.
+2. From *Overview*, copy the host, port, database name, user and password.
+3. Under *Allowed IP addresses*, add the **central VM's public IP `/32`**.
+   The stations never talk to the database and must not be allowlisted.
+4. Load the schema. No local `psql` needed:
 
    ```bash
-   psql "postgresql://avnadmin:<password>@<service>.aivencloud.com:<port>/weather_monitoring?sslmode=require" \
-     -f db/schema.sql
+   docker run --rm -i postgres:16 \
+     psql "postgresql://avnadmin:<password>@<host>:<port>/defaultdb?sslmode=require" \
+     < db/schema.sql
    ```
 
 Capture the `CREATE TABLE` output and the service's "Running" status page.
@@ -85,13 +115,14 @@ cp cloud/.env.example cloud/.env
 Then edit `cloud/.env`:
 
 - **Both VMs** — set `CENTRAL_PUBLIC_IP` to the central instance's public
-  IPv4 address. Allocate an Elastic IP for it first if you plan to stop and
-  restart the instance, otherwise the address changes and the stations
-  silently stop delivering.
+  IPv4 address. Reserve the IP in the OCI console if you plan to stop and
+  restart the instance, otherwise it changes and the stations silently stop
+  delivering.
 - **Central VM only** — set `DB_URL`, `DB_USER`, `DB_PASSWORD` from Aiven.
+  `DB_URL` must end in `?sslmode=require`.
 
-`cloud/.env` is gitignored, so credentials stay off the machine image and
-out of the repository. That is the "avoid hardcoding secrets" requirement.
+`cloud/.env` is gitignored, so credentials never enter the repository. That
+is the "avoid hardcoding secrets" requirement.
 
 ## 5. Start the central VM first
 
@@ -103,7 +134,8 @@ docker compose -f cloud/docker-compose.central.yml up -d --build
 docker compose -f cloud/docker-compose.central.yml ps
 ```
 
-Confirm the broker came up and the database connected:
+The first build compiles the project inside the container and takes a few
+minutes. Then confirm:
 
 ```bash
 docker compose -f cloud/docker-compose.central.yml logs kafka | grep -i started
@@ -112,8 +144,8 @@ docker compose -f cloud/docker-compose.central.yml logs central-station
 
 A healthy central station logs `Central Station started. Consuming
 'weather-readings'` and then `Persisted batch of N readings` every few
-seconds once data arrives. **This log is your proof of connectivity to the
-managed database** (Bonus B).
+seconds once data arrives. **That log line is your proof of connectivity to
+the managed database** (Bonus B).
 
 ## 6. Start the stations VM
 
@@ -147,22 +179,26 @@ docker compose -f cloud/docker-compose.central.yml exec kafka \
 And against Aiven, that all ten station IDs are landing:
 
 ```bash
-psql "$AIVEN_URL" -c \
-  'SELECT station_id, COUNT(*) FROM weather_readings GROUP BY station_id ORDER BY station_id;'
+docker run --rm -i postgres:16 psql "$AIVEN_URL" \
+  -c 'SELECT station_id, COUNT(*) FROM weather_readings GROUP BY station_id ORDER BY station_id;'
 ```
 
-Then run the Part E analysis:
+Then the Part E analysis:
 
 ```bash
-psql "$AIVEN_URL" -f db/analysis_queries.sql
+docker run --rm -i postgres:16 psql "$AIVEN_URL" < db/analysis_queries.sql
 ```
+
+Let it run ~20 minutes before capturing the analysis queries, so the
+battery split has converged near 30/40/30.
 
 ## 8. Evidence checklist for the report
 
 Bonus C is graded on the write-up, so collect these as you go:
 
-- [ ] EC2 console showing **two running instances**, with types and AZ
-- [ ] Both security groups' inbound rules
+- [ ] OCI console showing **two running instances**, with shape and OCPU/RAM
+- [ ] VCN security list ingress rules
+- [ ] `sudo iptables -L INPUT -n --line-numbers` on the central VM
 - [ ] Aiven service overview (plan, region, "Running")
 - [ ] Aiven allowed-IP list showing only the central VM
 - [ ] `docker compose ps` on **each** VM
@@ -171,43 +207,44 @@ Bonus C is graded on the write-up, so collect these as you go:
 - [ ] `kafka-console-consumer` output for both topics
 - [ ] Per-station row counts from Aiven, showing all ten IDs
 - [ ] Both Part E query results
-- [ ] A note that `cloud/.env` holds the credentials and is gitignored
 
 ## 9. Tear down
 
-EC2 bills per second and the Aiven free plan does not expire, but neither
-stops on its own:
+The Ampere instances are Always Free and cost nothing if you leave them,
+but the Aiven free plan and your own tidiness argue for stopping:
 
 ```bash
 docker compose -f cloud/docker-compose.stations.yml down
 docker compose -f cloud/docker-compose.central.yml down
 ```
 
-Then **terminate both instances** in the EC2 console, release the Elastic
-IP if you allocated one (an unattached EIP is billed), and power off the
-Aiven service.
+Terminate both instances in the OCI console if you want the Ampere
+allowance back, and power off the Aiven service.
 
 ## Troubleshooting
 
 **Stations log `Connection to node -1 could not be established` forever.**
-The broker is unreachable on 9092. Check `CENTRAL_PUBLIC_IP` matches the
-current public IP, and that `weather-central-sg` allows 9092 from
-`weather-stations-sg`.
+The broker is unreachable on 9092. Check in order: `CENTRAL_PUBLIC_IP`
+matches the current public IP; the VCN security list allows 9092 from the
+stations VM; and — most likely — the iptables rule from §2b is present on
+the central VM. Verify with `sudo iptables -L INPUT -n --line-numbers`.
 
-**Stations connect, then time out sending.** Classic advertised-listener
-problem: the broker handed back an address the stations cannot reach.
-Confirm `KAFKA_CFG_ADVERTISED_LISTENERS` resolved to the real public IP:
+**Stations connect, then time out sending.** Advertised-listener problem:
+the broker handed back an address the stations cannot reach. Confirm it
+resolved to the real public IP:
 
 ```bash
-docker compose -f cloud/docker-compose.central.yml exec kafka \
-  env | grep ADVERTISED
+docker compose -f cloud/docker-compose.central.yml exec kafka env | grep ADVERTISED
 ```
 
 **Central station exits with an SSL or authentication error.** Aiven
 requires TLS — `DB_URL` must end in `?sslmode=require`. If it instead
-reports being unable to connect at all, the central VM's IP is missing
-from the Aiven allowlist.
+cannot connect at all, the central VM's IP is missing from the Aiven
+allowlist.
 
-**A station container keeps restarting.** Almost always the OOM-killer on
-an undersized instance. Check `docker inspect <container> | grep OOMKilled`
-and move to a larger type.
+**`exec format error` when a container starts.** An amd64-only image was
+pulled onto ARM. All images this project uses have arm64 variants; if you
+changed a tag, check it with `docker manifest inspect <image>`.
+
+**"Out of host capacity" creating the instance.** See §1 — retry, change
+availability domain, or change region.
