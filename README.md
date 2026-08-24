@@ -45,11 +45,6 @@ weather-monitoring/
 │   ├── central-station.yaml
 │   ├── rain-detector.yaml
 │   └── README.md
-├── cloud/                        # Azure two-VM bonus deployment
-│   ├── docker-compose.central.yml
-│   ├── docker-compose.stations.yml
-│   ├── .env.example
-│   └── README.md
 └── Lab4-NetCentric.pdf
 ```
 
@@ -95,15 +90,6 @@ The StatefulSet is used because each station needs a unique ID. Pods `weather-st
 
 See [`k8s/README.md`](k8s/README.md) for the exact Minikube build, deployment, and validation commands.
 
-## Cloud deployment — bonus
-
-[`cloud/README.md`](cloud/README.md) deploys the same system across two
-Microsoft Azure virtual machines without Kubernetes, writing to a managed
-Aiven PostgreSQL database. Stations run on one VM, Kafka and the central
-station on the other, and all configuration comes from a gitignored
-`cloud/.env`. Azure for Students provides the credit without requiring a
-payment card, within a 3 vCPU subscription cap that dictates the VM sizes.
-
 ## SQL analysis
 
 `db/analysis_queries.sql` contains the required historical checks:
@@ -146,8 +132,6 @@ docker build -f central-station/Dockerfile -t central-station:latest .
 
 ## Submission checklist
 
-Mandatory:
-
 - [x] Weather station mock
 - [x] 30/40/30 battery distribution
 - [x] 10% message drop simulation
@@ -163,13 +147,6 @@ Mandatory:
 - [x] Kubernetes Central Station
 - [x] Kubernetes 10-station deployment
 - [x] Kubernetes Rain Detector
-- [ ] Run the full cluster and capture screenshots/logs for the final report
-- [ ] Export the final technical report as PDF with actual deployment evidence
+- [x] Run the full cluster and capture screenshots/logs for the final report
+- [ ] Export the final technical report as PDF
 
-Bonus:
-
-- [x] Two-VM deployment assets (Azure, no Kubernetes) — `cloud/`
-- [x] Managed-database configuration with no secrets in source
-- [ ] Provision the two Azure VMs and the Aiven service
-- [ ] Capture the cloud evidence listed in [`cloud/README.md`](cloud/README.md)
-- [ ] Write the Cloud Deployment section of the report
