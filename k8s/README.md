@@ -8,6 +8,24 @@ This deployment satisfies the mandatory Kubernetes part of Lab 4: ZooKeeper, Kaf
 - Minikube (recommended) or another Kubernetes cluster
 - kubectl
 
+### Cluster sizing
+
+Every pod declares resource requests, which together come to roughly
+**2.3 GiB of memory and 0.85 CPU** — the ten weather stations alone
+account for about 1 GiB. Minikube's defaults (2 CPU / 2 GiB) cannot
+schedule that, and pods will sit in `Pending` with
+`Insufficient memory`. Start it with room to spare:
+
+```bash
+minikube start --cpus=4 --memory=6g
+```
+
+Check for unschedulable pods with:
+
+```bash
+kubectl -n weather-monitoring get pods --field-selector=status.phase=Pending
+```
+
 ## 1. Build the application images
 
 From the repository root:

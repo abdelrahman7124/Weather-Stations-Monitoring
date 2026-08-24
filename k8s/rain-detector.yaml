@@ -17,8 +17,15 @@ spec:
         - name: rain-detector
           image: central-station:latest
           imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "640Mi"
+              cpu: "500m"
           command: ["java"]
-          args: ["-cp", "/app/central-station.jar", "com.weathermonitoring.central.RainDetectorApp"]
+          args: ["-XX:MaxRAMPercentage=75.0", "-cp", "/app/central-station.jar", "com.weathermonitoring.central.RainDetectorApp"]
           env:
             - name: KAFKA_BOOTSTRAP_SERVERS
               value: kafka:9092

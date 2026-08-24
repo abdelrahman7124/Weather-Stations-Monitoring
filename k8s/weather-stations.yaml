@@ -34,6 +34,13 @@ spec:
         - name: weather-station
           image: weather-station:latest
           imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              memory: "96Mi"
+              cpu: "25m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
           env:
             - name: KAFKA_BOOTSTRAP_SERVERS
               value: kafka:9092

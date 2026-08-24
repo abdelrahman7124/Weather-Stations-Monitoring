@@ -17,6 +17,13 @@ spec:
         - name: central-station
           image: central-station:latest
           imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              memory: "192Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
           env:
             - name: KAFKA_BOOTSTRAP_SERVERS
               value: kafka:9092

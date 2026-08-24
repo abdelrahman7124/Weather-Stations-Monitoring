@@ -11,4 +11,4 @@ FROM eclipse-temurin:17-jre
 WORKDIR /app
 COPY --from=build /build/central-station/target/central-station.jar /app/central-station.jar
 ENV KAFKA_BOOTSTRAP_SERVERS=kafka:9092
-ENTRYPOINT ["java", "-jar", "/app/central-station.jar"]
+ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75.0", "-jar", "/app/central-station.jar"]
