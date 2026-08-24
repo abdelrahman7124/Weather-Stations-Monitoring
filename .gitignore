@@ -1,5 +1,6 @@
 # Maven build output
 target/
+dependency-reduced-pom.xml
 
 # IntelliJ IDEA
 .idea/
@@ -8,6 +9,10 @@ target/
 # Runtime logs
 *.log
 
+# Local secrets (cloud deployment)
+.env
+
 # OS files
 .DS_Store
 Thumbs.db
+*Zone.Identifier
