@@ -68,20 +68,32 @@ public class CentralStationApp {
                         && System.currentTimeMillis() - lastFlush >= FLUSH_INTERVAL_MS;
 
                 if (sizeThresholdHit || timeThresholdHit) {
-                    repository.insertBatch(buffer);
-                    buffer.clear();
-                    consumer.commitSync();
+                    flush(repository, consumer, buffer);
                     lastFlush = System.currentTimeMillis();
                 }
             }
+            // Reached only on a clean shutdown; drain whatever is still buffered.
+            flush(repository, consumer, buffer);
+            log.info("Central Station stopped cleanly.");
         } finally {
-            if (!buffer.isEmpty()) {
-                repository.insertBatch(buffer);
-                consumer.commitSync();
-            }
             repository.close();
             consumer.close();
-            log.info("Central Station stopped cleanly.");
         }
+    }
+
+    /**
+     * Persists the buffer and only then commits the offsets it came from, so a
+     * crash in between replays the batch rather than losing it. Inserts are
+     * idempotent on (station_id, sequence_number), so a replay is harmless.
+     */
+    private static void flush(WeatherReadingRepository repository,
+                              KafkaConsumer<String, String> consumer,
+                              List<WeatherStatusMessage> buffer) throws SQLException {
+        if (buffer.isEmpty()) {
+            return;
+        }
+        repository.insertBatch(buffer);
+        buffer.clear();
+        consumer.commitSync();
     }
 }
